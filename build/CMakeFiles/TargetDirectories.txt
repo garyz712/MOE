@@ -1,3 +1,0 @@
-/home/junyangz/lab4-2025-main/build/CMakeFiles/point_alignment.dir
-/home/junyangz/lab4-2025-main/build/CMakeFiles/edit_cache.dir
-/home/junyangz/lab4-2025-main/build/CMakeFiles/rebuild_cache.dir

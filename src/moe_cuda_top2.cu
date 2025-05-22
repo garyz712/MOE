@@ -55,11 +55,11 @@ __global__ void max_reduction_top2_kernel(const float* logits, int* assignments,
     int token_idx = blockIdx.x;
     int tid = threadIdx.x;
 
-    // Initialize local max values and indices
+    // Initialize local max values and indices, each thread must hold TOP 2 MAX values that it has seen
     float max_val[2] = {-1e9f, -1e9f};
     int max_idx[2] = {-1, -1};
 
-    // Each thread processes a subset of logits
+    // Each thread processes a subset of logits, each block process one token
     for (int i = tid; i < N; i += blockDim.x) {
         float val = logits[token_idx * N + i];
         if (val > max_val[0]) {
@@ -74,33 +74,19 @@ __global__ void max_reduction_top2_kernel(const float* logits, int* assignments,
     }
 
     // Store in shared memory
-    s_logits[tid][0] = max_val[0];
+    s_logits[tid][0] = max_val[0]; //here we know max_val[0] >= max_val[0]
     s_logits[tid][1] = max_val[1];
     s_indices[tid][0] = max_idx[0];
     s_indices[tid][1] = max_idx[1];
     __syncthreads();
 
-    // Perform reduction within block
+    // Perform top 2 reduction within block
     for (int s = blockDim.x / 2; s > 0; s >>= 1) {
         if (tid < s) {
-            // Compare first max
-            if (s_logits[tid][0] < s_logits[tid + s][0]) {
-                // Shift current max to second place
-                s_logits[tid][1] = s_logits[tid][0];
-                s_indices[tid][1] = s_indices[tid][0];
-                // Update max
-                s_logits[tid][0] = s_logits[tid + s][0];
-                s_indices[tid][0] = s_indices[tid + s][0];
-            }
-            // Compare second max (only if the other thread's max is not already used)
-            if (s_logits[tid][1] < s_logits[tid + s][0] && s_indices[tid + s][0] != s_indices[tid][0]) {
+            // Compare second max at tid vs first max at tid+s: if smaller, do move the tid+s first max to tid second max, else do nothing
+            if (s_logits[tid][1] < s_logits[tid + s][0]) {
                 s_logits[tid][1] = s_logits[tid + s][0];
                 s_indices[tid][1] = s_indices[tid + s][0];
-            }
-            // Also consider the second max from the other thread
-            if (s_logits[tid][1] < s_logits[tid + s][1] && s_indices[tid + s][1] != s_indices[tid][0]) {
-                s_logits[tid][1] = s_logits[tid + s][1];
-                s_indices[tid][1] = s_indices[tid + s][1];
             }
         }
         __syncthreads();
@@ -108,7 +94,7 @@ __global__ void max_reduction_top2_kernel(const float* logits, int* assignments,
 
     // Thread 0 computes softmax and stores results
     if (tid == 0 && token_idx < M) {
-        float max_logit = s_logits[0][0];
+        float max_logit = s_logits[0][0]; // this is the top 1 max value in the logits
         float exp_sum = 0.0f;
         float exp_vals[2];
         exp_vals[0] = expf(s_logits[0][0] - max_logit);

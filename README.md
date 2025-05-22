@@ -1,58 +1,50 @@
-Project Proposal: GPU-Accelerated Mixture-of-Experts (MoE) Router with Variable-k Expert Routing
-Summary
-This project aims to implement a GPU-accelerated inference kernel for the router component of a Mixture-of-Experts (MoE) transformer model. The focus is on supporting variable-k routing, where each token can dynamically route to either one or two experts (i.e., k=1 or k=2) based on router confidence. The project will compare the speed and accuracy of the MoE model against a standard dense MLP layer under this routing regime.
 
-Background Information
-Mixture-of-Experts (MoE) models selectively activate only a subset of model parameters for each input token, enabling substantial computational savings and improved model capacity. Traditional MoE designs use fixed-k routing (e.g., always top-1 or top-2 experts). This project extends that by allowing per-token flexibility—each token can route to either 1 or 2 experts, depending on the router's output distribution.
 
-This dynamic routing aims to improve model efficiency without significantly compromising accuracy. The project will compare this approach against standard dense MLPs to evaluate trade-offs in inference time and predictive performance.
+# Project Proposal: GPU-Accelerated Mixture-of-Experts (MoE) Router with Fixed Top-k Routing and MLP Comparison
 
-Computation Details
-Inputs: Token embeddings and router logits.
+## Summary
 
-Routing Strategy: Dynamic k ∈ {1, 2} based on confidence thresholding.
+This project implements a GPU-accelerated inference kernel for the **router component** of a Mixture-of-Experts (MoE) transformer model. It supports **fixed top-`k` expert routing**, where `k` is predefined (either 1 or 2), allowing each token to be routed to either one or two experts. Additionally, the project includes a comparison of inference speed and accuracy between the MoE architecture and a standard dense MLP layer.
 
-Output: Expert assignments per token and aggregated MLP outputs from selected experts.
+## Background
 
-Project Explanation
-The project involves the following core components:
+Mixture-of-Experts models selectively activate a small subset of experts per input token, significantly reducing computation compared to dense layers. This project explores the performance characteristics of fixed-top-`k` MoE routing (with `k=1` and `k=2`) versus traditional MLPs, using CUDA to accelerate inference on GPUs.
 
-MoE Router Kernel: Implements GPU routing logic that supports variable expert selection (k=1 or k=2 per token).
+## Design Overview
 
-Expert MLP Execution: Parallel expert computations with efficient token-to-expert dispatch.
+* **Routing Modes**: Supports both `k=1` and `k=2` routing, where each token is assigned to the top-1 or top-2 experts based on router logits. The value of `k` is fixed at runtime (not adaptive).
+* **Expert Execution**: Tokens assigned to the same expert are batched and processed together using shared expert MLPs.
+* **Comparative Baseline**: A standard dense MLP layer is implemented as a baseline for performance and accuracy comparison.
 
-Baseline Comparison: A dense MLP implementation for comparison in terms of speed and accuracy.
+## Computation Details
 
-Questions to Address
-What inference speedup does dynamic k=1/2 routing provide over dense MLPs?
+* **Inputs**: Token embeddings and router weight matrices.
+* **Routing Output**: Expert assignments per token and corresponding MLP outputs.
+* **k Values**: `k=1` and `k=2` are both supported with separate implementations.
 
-How does allowing k=1 for confident tokens affect overall accuracy and load balance?
+## Project Components
 
-Can a variable-k MoE retain accuracy while reducing computational cost?
+1. **MoE Router**: GPU-accelerated router to assign each token to its top-`k` experts.
+2. **Expert Execution**: Efficient CUDA kernel for dispatching and computing expert MLPs.
+3. **Comparison**: Evaluate and benchmark the MoE model against a dense MLP layer in terms of speed and accuracy.
 
-Previous GPU Implementations
-Prior models like Switch Transformer (k=1) and DeepSpeed-MoE (k=2) have demonstrated efficient GPU MoE implementations. However, none explore adaptive k-selection per token, which this project introduces.
+## Key Questions
 
-Technical Challenges
-Efficient GPU implementation of dynamic routing decisions (k=1 or 2).
+* What are the performance benefits of top-`k` MoE routing (with `k=1/2`) over a dense MLP?
+* How does increasing `k` from 1 to 2 affect GPU utilization and model accuracy?
 
-Load balancing across experts given per-token k.
+## Technical Challenges
 
-Memory management for dynamically varying expert outputs and token scatter/gather operations.
+* Efficiently batching tokens by expert index for parallel GPU execution.
+* Designing fast CUDA kernels for MLP inference under sparse token-to-expert routing.
+* Managing memory access patterns to ensure high throughput.
 
-Problems to Solve
-Design routing logic that adaptively selects 1 or 2 experts based on token confidence.
+## Deliverables
 
-Optimize expert dispatch and aggregation in CUDA with minimal overhead.
+* CPU baseline for MoE and dense MLP inference.
+* CUDA kernels for MoE routing and expert MLP computation.
+* Benchmarks comparing speed and accuracy across `k=1`, `k=2`, and dense MLP.
+* Documentation and analysis of routing behavior and performance.
 
-Compare MoE and MLP models with controlled benchmarks.
 
-Deliverables and Goals
-CPU baseline implementations for MoE and dense MLP.
-
-CUDA kernels for MoE routing and expert computation with dynamic k.
-
-Benchmark results comparing MoE vs MLP for inference speed and accuracy.
-
-Documentation detailing implementation, challenges, and analysis.
 

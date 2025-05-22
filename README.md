@@ -46,5 +46,22 @@ Mixture-of-Experts models selectively activate a small subset of experts per inp
 * Benchmarks comparing speed and accuracy across `k=1`, `k=2`, and dense MLP.
 * Documentation and analysis of routing behavior and performance.
 
+## Usage:
 
+* cd into src folder
+* Compile the files like: nvcc -o test_moe_top2 test_moe_top2.cpp moe_cpu_top2.cpp moe_cuda_top2.cu -std=c++11
+* Run the testbench: ./test_moe_top2
+* You will see somthing like: 
+
+MoE Router Top-2 (batch=16, seq=128, embed=256, experts=64): Passed (CPU: 230.231 ms)
+MoE Router Top-2 (batch=16, seq=128, embed=256, experts=64): Passed (CUDA: 1.36749 ms)
+MoE Expert MLP Top-2 (batch=16, seq=128, embed=256, hidden_moe=8, experts=64): Passed (CPU: 79.9812 ms)
+MoE Expert MLP Top-2 (batch=16, seq=128, embed=256, hidden_moe=8, experts=64): Passed (CUDA: 15.386 ms)
+Dense MLP (batch=16, seq=128, embed=256, hidden_dense=512): Passed (CPU: 2342.68 ms)
+Dense MLP (batch=16, seq=128, embed=256, hidden_dense=512): Passed (CUDA: 5.81968 ms)
+Execution Times:
+CPU MoE (Router + Expert MLP): 310.213 ms
+CUDA MoE (Router + Expert MLP): 16.7535 ms
+CPU Dense MLP: 2342.68 ms
+CUDA Dense MLP: 5.81968 ms
 

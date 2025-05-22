@@ -52,7 +52,6 @@ Mixture-of-Experts models selectively activate a small subset of experts per inp
 * Compile the files like: nvcc -o test_moe_top2 test_moe_top2.cpp moe_cpu_top2.cpp moe_cuda_top2.cu -std=c++11
 * Run the testbench: ./test_moe_top2
 * You will see somthing like below:
-* Finally, download Nvidia Nsight compute and run the profiler using: ncu -o rope_profile_top2 --set full ./test_moe_top2
 
     MoE Router Top-2 (batch=16, seq=128, embed=256, experts=64): Passed (CPU: 230.231 ms)
     
@@ -76,3 +75,4 @@ Mixture-of-Experts models selectively activate a small subset of experts per inp
     
     CUDA Dense MLP: 5.81968 ms
 
+* Finally, download Nvidia Nsight compute and run the profiler using: ncu -o rope_profile_top2 --set full ./test_moe_top2

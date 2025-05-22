@@ -1,6 +1,6 @@
 
 
-# GPU-Accelerated Mixture-of-Experts (MoE) Router with Fixed Top-k Routing and MLP Comparison
+# GPU-Accelerated Mixture-of-Experts (MoE) Router with Sparse Top-k Routing and MLP Comparison
 
 ## Summary
 

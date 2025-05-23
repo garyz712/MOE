@@ -82,12 +82,24 @@ __global__ void max_reduction_top2_kernel(const float* logits, int* assignments,
 
     // Perform top 2 reduction within block
     for (int s = blockDim.x / 2; s > 0; s >>= 1) {
-        if (tid < s) {
-            // Compare second max at tid vs first max at tid+s: if smaller, do move the tid+s first max to tid second max, else do nothing
-            if (s_logits[tid][1] < s_logits[tid + s][0]) {
-                s_logits[tid][1] = s_logits[tid + s][0];
-                s_indices[tid][1] = s_indices[tid + s][0];
-            }
+        // Compare first max
+        if (s_logits[tid][0] < s_logits[tid + s][0]) {
+            // Shift current max to second place
+            s_logits[tid][1] = s_logits[tid][0];
+            s_indices[tid][1] = s_indices[tid][0];
+            // Update max
+            s_logits[tid][0] = s_logits[tid + s][0];
+            s_indices[tid][0] = s_indices[tid + s][0];
+        }
+        // Compare second max (only if the other thread's max is not already used)
+        if (s_logits[tid][1] < s_logits[tid + s][0] && s_indices[tid + s][0] != s_indices[tid][0]) {
+            s_logits[tid][1] = s_logits[tid + s][0];
+            s_indices[tid][1] = s_indices[tid + s][0];
+        }
+        // Also consider the second max from the other thread
+        if (s_logits[tid][1] < s_logits[tid + s][1] && s_indices[tid + s][1] != s_indices[tid][0]) {
+            s_logits[tid][1] = s_logits[tid + s][1];
+            s_indices[tid][1] = s_indices[tid + s][1];
         }
         __syncthreads();
     }

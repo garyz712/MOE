@@ -1,4 +1,4 @@
-#include "moe_cuda_top2.h"
+
 #include <cuda_runtime.h>
 #include <vector>
 #include <iostream>
@@ -48,6 +48,7 @@ __global__ void matmul_tiled_kernel(const float* A, const float* B, float* C, in
     }
 }
 
+// Top-2 expert selection kernel
 __global__ void max_reduction_top2_kernel(const float* logits, int* assignments, float* weights, int M, int N) {
     __shared__ float s_logits[TILE_WIDTH][2];
     __shared__ int s_indices[TILE_WIDTH][2];
@@ -55,11 +56,11 @@ __global__ void max_reduction_top2_kernel(const float* logits, int* assignments,
     int token_idx = blockIdx.x;
     int tid = threadIdx.x;
 
-    // Initialize local max values and indices, each thread must hold TOP 2 MAX values that it has seen
+    // Initialize local max values and indices
     float max_val[2] = {-1e9f, -1e9f};
     int max_idx[2] = {-1, -1};
 
-    // Each thread processes a subset of logits, each block process one token
+    // Each thread processes a subset of logits
     for (int i = tid; i < N; i += blockDim.x) {
         float val = logits[token_idx * N + i];
         if (val > max_val[0]) {
@@ -74,39 +75,38 @@ __global__ void max_reduction_top2_kernel(const float* logits, int* assignments,
     }
 
     // Store in shared memory
-    s_logits[tid][0] = max_val[0]; //here we know max_val[0] >= max_val[0]
+    s_logits[tid][0] = max_val[0];
     s_logits[tid][1] = max_val[1];
     s_indices[tid][0] = max_idx[0];
     s_indices[tid][1] = max_idx[1];
     __syncthreads();
 
-    // Perform top 2 reduction within block
+    // Perform reduction within block
     for (int s = blockDim.x / 2; s > 0; s >>= 1) {
-        // Compare first max
-        if (s_logits[tid][0] < s_logits[tid + s][0]) {
-            // Shift current max to second place
-            s_logits[tid][1] = s_logits[tid][0];
-            s_indices[tid][1] = s_indices[tid][0];
-            // Update max
-            s_logits[tid][0] = s_logits[tid + s][0];
-            s_indices[tid][0] = s_indices[tid + s][0];
-        }
-        // Compare second max (only if the other thread's max is not already used)
-        if (s_logits[tid][1] < s_logits[tid + s][0] && s_indices[tid + s][0] != s_indices[tid][0]) {
-            s_logits[tid][1] = s_logits[tid + s][0];
-            s_indices[tid][1] = s_indices[tid + s][0];
-        }
-        // Also consider the second max from the other thread
-        if (s_logits[tid][1] < s_logits[tid + s][1] && s_indices[tid + s][1] != s_indices[tid][0]) {
-            s_logits[tid][1] = s_logits[tid + s][1];
-            s_indices[tid][1] = s_indices[tid + s][1];
+        if (tid < s) {
+            // Compare first max
+            if (s_logits[tid][0] < s_logits[tid + s][0]) {
+                s_logits[tid][1] = s_logits[tid][0];
+                s_indices[tid][1] = s_indices[tid][0];
+                s_logits[tid][0] = s_logits[tid + s][0];
+                s_indices[tid][0] = s_indices[tid + s][0];
+            }
+            // Compare second max
+            if (s_logits[tid][1] < s_logits[tid + s][0] && s_indices[tid + s][0] != s_indices[tid][0]) {
+                s_logits[tid][1] = s_logits[tid + s][0];
+                s_indices[tid][1] = s_indices[tid + s][0];
+            }
+            if (s_logits[tid][1] < s_logits[tid + s][1] && s_indices[tid + s][1] != s_indices[tid][0]) {
+                s_logits[tid][1] = s_logits[tid + s][1];
+                s_indices[tid][1] = s_indices[tid + s][1];
+            }
         }
         __syncthreads();
     }
 
     // Thread 0 computes softmax and stores results
     if (tid == 0 && token_idx < M) {
-        float max_logit = s_logits[0][0]; // this is the top 1 max value in the logits
+        float max_logit = s_logits[0][0];
         float exp_sum = 0.0f;
         float exp_vals[2];
         exp_vals[0] = expf(s_logits[0][0] - max_logit);
@@ -119,6 +119,33 @@ __global__ void max_reduction_top2_kernel(const float* logits, int* assignments,
     }
 }
 
+// New kernel to combine expert outputs without atomicAdd
+__global__ void combine_expert_outputs_kernel(
+    const float* d_expert_outputs, const int* d_assignments, const float* d_weights,
+    float* d_outputs, int M, int hidden_dim_moe, int num_experts) {
+    int token_idx = blockIdx.x * blockDim.x + threadIdx.x; // Token index
+    int dim_idx = blockIdx.y * blockDim.y + threadIdx.y;   // Hidden dimension index
+
+    if (token_idx < M && dim_idx < hidden_dim_moe) {
+        // Get the two expert indices and their weights for this token
+        int expert_idx1 = d_assignments[token_idx * 2];
+        int expert_idx2 = d_assignments[token_idx * 2 + 1];
+        float weight1 = d_weights[token_idx * 2];
+        float weight2 = d_weights[token_idx * 2 + 1];
+
+        // Compute weighted sum of expert outputs for this token and dimension
+        float output = 0.0f;
+        if (expert_idx1 >= 0 && expert_idx1 < num_experts) {
+            output += weight1 * d_expert_outputs[expert_idx1 * M * hidden_dim_moe + token_idx * hidden_dim_moe + dim_idx];
+        }
+        if (expert_idx2 >= 0 && expert_idx2 < num_experts) {
+            output += weight2 * d_expert_outputs[expert_idx2 * M * hidden_dim_moe + token_idx * hidden_dim_moe + dim_idx];
+        }
+
+        // Write directly to output (no atomic operation needed)
+        d_outputs[token_idx * hidden_dim_moe + dim_idx] = output;
+    }
+}
 
 std::vector<std::vector<std::pair<int, float>>> moe_router_cuda(
     const float* token_embeddings, const float* router_weights,
@@ -173,19 +200,6 @@ std::vector<std::vector<std::pair<int, float>>> moe_router_cuda(
     return result;
 }
 
-__global__ void scatter_weighted_outputs_kernel(
-    const float* d_expert_outputs, const int* d_token_indices, const float* d_token_weights,
-    float* d_outputs, int num_tokens, int hidden_dim_moe) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x; // Token index
-    int j = blockIdx.y * blockDim.y + threadIdx.y; // Hidden dimension index
-
-    if (i < num_tokens && j < hidden_dim_moe) {
-        int token_idx = d_token_indices[i];
-        float weight = d_token_weights[i];
-        float val = d_expert_outputs[i * hidden_dim_moe + j] * weight;
-        atomicAdd(&d_outputs[token_idx * hidden_dim_moe + j], val);
-    }
-}
 std::vector<float> moe_expert_mlp_cuda(
     const float* token_embeddings,
     const std::vector<std::vector<float>>& expert_weights,
@@ -193,21 +207,18 @@ std::vector<float> moe_expert_mlp_cuda(
     int batch_size, int seq_len, int embed_dim, int hidden_dim_moe, int num_experts) {
     int M = batch_size * seq_len;
 
-    // Group tokens by expert
-    std::vector<std::vector<std::pair<int, float>>> tokens_per_expert(num_experts);
-    for (int i = 0; i < M; ++i) {
-        for (int k = 0; k < 2; ++k) {
-            int expert_idx = assignments[i][k].first;
-            tokens_per_expert[expert_idx].push_back({i, assignments[i][k].second});
-        }
-    }
-
     // Allocate device memory
-    float *d_token_embeddings, *d_expert_weights, *d_outputs;
+    float *d_token_embeddings, *d_expert_weights, *d_expert_outputs, *d_outputs;
+    int *d_assignments;
+    float *d_weights;
+
     CUDA_CHECK(cudaMalloc(&d_token_embeddings, M * embed_dim * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&d_expert_weights, num_experts * embed_dim * hidden_dim_moe * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_expert_outputs, num_experts * M * hidden_dim_moe * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&d_outputs, M * hidden_dim_moe * sizeof(float)));
     CUDA_CHECK(cudaMemset(d_outputs, 0, M * hidden_dim_moe * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_assignments, M * 2 * sizeof(int)));
+    CUDA_CHECK(cudaMalloc(&d_weights, M * 2 * sizeof(float)));
 
     // Copy inputs to device
     CUDA_CHECK(cudaMemcpy(d_token_embeddings, token_embeddings, M * embed_dim * sizeof(float), cudaMemcpyHostToDevice));
@@ -217,63 +228,38 @@ std::vector<float> moe_expert_mlp_cuda(
     }
     CUDA_CHECK(cudaMemcpy(d_expert_weights, all_expert_weights.data(), num_experts * embed_dim * hidden_dim_moe * sizeof(float), cudaMemcpyHostToDevice));
 
+    // Copy assignments and weights to device
+    std::vector<int> flat_assignments(M * 2);
+    std::vector<float> flat_weights(M * 2);
+    for (int i = 0; i < M; ++i) {
+        flat_assignments[i * 2] = assignments[i][0].first;
+        flat_assignments[i * 2 + 1] = assignments[i][1].first;
+        flat_weights[i * 2] = assignments[i][0].second;
+        flat_weights[i * 2 + 1] = assignments[i][1].second;
+    }
+    CUDA_CHECK(cudaMemcpy(d_assignments, flat_assignments.data(), M * 2 * sizeof(int), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_weights, flat_weights.data(), M * 2 * sizeof(float), cudaMemcpyHostToDevice));
+
     // Process each expert
     dim3 threadsPerBlockMatmul(TILE_WIDTH, TILE_WIDTH);
-    dim3 threadsPerBlockScatter(16, 16); // Adjust as needed for your GPU
     for (int e = 0; e < num_experts; ++e) {
-        if (tokens_per_expert[e].empty()) continue;
-        int num_tokens = tokens_per_expert[e].size();
-
-        // Allocate and copy token indices and weights
-        int *d_token_indices;
-        float *d_token_weights;
-        CUDA_CHECK(cudaMalloc(&d_token_indices, num_tokens * sizeof(int)));
-        CUDA_CHECK(cudaMalloc(&d_token_weights, num_tokens * sizeof(float)));
-        std::vector<int> token_indices(num_tokens);
-        std::vector<float> token_weights(num_tokens);
-        for (int i = 0; i < num_tokens; ++i) {
-            token_indices[i] = tokens_per_expert[e][i].first;
-            token_weights[i] = tokens_per_expert[e][i].second;
-        }
-        CUDA_CHECK(cudaMemcpy(d_token_indices, token_indices.data(), num_tokens * sizeof(int), cudaMemcpyHostToDevice));
-        CUDA_CHECK(cudaMemcpy(d_token_weights, token_weights.data(), num_tokens * sizeof(float), cudaMemcpyHostToDevice));
-
-        // Create temporary input and output arrays
-        float *d_expert_inputs, *d_expert_outputs;
-        CUDA_CHECK(cudaMalloc(&d_expert_inputs, num_tokens * embed_dim * sizeof(float)));
-        CUDA_CHECK(cudaMalloc(&d_expert_outputs, num_tokens * hidden_dim_moe * sizeof(float)));
-
-        // Gather inputs for this expert
-        for (int i = 0; i < num_tokens; ++i) {
-            int token_idx = token_indices[i];
-            CUDA_CHECK(cudaMemcpy(d_expert_inputs + i * embed_dim,
-                                 d_token_embeddings + token_idx * embed_dim,
-                                 embed_dim * sizeof(float), cudaMemcpyDeviceToDevice));
-        }
-
-        // Expert computation: matmul_tiled_kernel
-        dim3 numBlocksMatmul((hidden_dim_moe + TILE_WIDTH - 1) / TILE_WIDTH, (num_tokens + TILE_WIDTH - 1) / TILE_WIDTH);
-        matmul_tiled_kernel<<<numBlocksMatmul, threadsPerBlockMatmul>>>(d_expert_inputs,
-                                                                       d_expert_weights + e * embed_dim * hidden_dim_moe,
-                                                                       d_expert_outputs,
-                                                                       num_tokens, embed_dim, hidden_dim_moe);
+        // Compute expert outputs for all tokens
+        dim3 numBlocksMatmul((hidden_dim_moe + TILE_WIDTH - 1) / TILE_WIDTH, (M + TILE_WIDTH - 1) / TILE_WIDTH);
+        matmul_tiled_kernel<<<numBlocksMatmul, threadsPerBlockMatmul>>>(
+            d_token_embeddings,
+            d_expert_weights + e * embed_dim * hidden_dim_moe,
+            d_expert_outputs + e * M * hidden_dim_moe,
+            M, embed_dim, hidden_dim_moe);
         CUDA_CHECK(cudaGetLastError());
-
-        // Scatter outputs with weights
-        dim3 numBlocksScatter((num_tokens + threadsPerBlockScatter.x - 1) / threadsPerBlockScatter.x,
-                              (hidden_dim_moe + threadsPerBlockScatter.y - 1) / threadsPerBlockScatter.y);
-        scatter_weighted_outputs_kernel<<<numBlocksScatter, threadsPerBlockScatter>>>(d_expert_outputs,
-                                                                                    d_token_indices,
-                                                                                    d_token_weights,
-                                                                                    d_outputs,
-                                                                                    num_tokens, hidden_dim_moe);
-        CUDA_CHECK(cudaGetLastError());
-
-        CUDA_CHECK(cudaFree(d_expert_inputs));
-        CUDA_CHECK(cudaFree(d_expert_outputs));
-        CUDA_CHECK(cudaFree(d_token_indices));
-        CUDA_CHECK(cudaFree(d_token_weights));
     }
+
+    // Combine expert outputs using weights
+    dim3 threadsPerBlockCombine(16, 16);
+    dim3 numBlocksCombine((M + threadsPerBlockCombine.x - 1) / threadsPerBlockCombine.x,
+                          (hidden_dim_moe + threadsPerBlockCombine.y - 1) / threadsPerBlockCombine.y);
+    combine_expert_outputs_kernel<<<numBlocksCombine, threadsPerBlockCombine>>>(
+        d_expert_outputs, d_assignments, d_weights, d_outputs, M, hidden_dim_moe, num_experts);
+    CUDA_CHECK(cudaGetLastError());
 
     // Copy outputs back
     std::vector<float> outputs(M * hidden_dim_moe);
@@ -282,7 +268,10 @@ std::vector<float> moe_expert_mlp_cuda(
     // Free memory
     CUDA_CHECK(cudaFree(d_token_embeddings));
     CUDA_CHECK(cudaFree(d_expert_weights));
+    CUDA_CHECK(cudaFree(d_expert_outputs));
     CUDA_CHECK(cudaFree(d_outputs));
+    CUDA_CHECK(cudaFree(d_assignments));
+    CUDA_CHECK(cudaFree(d_weights));
 
     return outputs;
 }

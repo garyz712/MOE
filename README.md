@@ -73,7 +73,7 @@ All tests passed!
 
 * Finally, download Nvidia Nsight compute and run the profiler using: ncu -o rope_profile_top2 --set full ./test_moe_top2
 
-## Performance and Analysis:   
+## Performance:   
 
     K=1 MOE vs K=2 MOE Speedup: 1.6x
     Sparse MOE vs Dense MLP Speedup: 3.3x
@@ -81,6 +81,7 @@ All tests passed!
     GPU MLP vs CPU MLP Speedup: 417x
     GPU MOE vs CPU MLP Speedup: 1347x
 
+## Analysis
 The experiment results highlight significant performance differences between dense MLP, K=1 MOE, and K=2 MOE implementations across CPU and CUDA platforms. For dense MLP, CPU execution times range from 0.028425 ms to 2363.94 ms, while CUDA drastically reduces this to 0.1984 ms to 5.85469 ms, showcasing GPU's superior parallel processing for large-scale matrix operations. K=1 MOE, combining router and expert MLP, performs better on CPU (0.01699 ms to 262.114 ms) than dense MLP due to selective expert computation, with CUDA further accelerating it to 0.470208 ms to 2.43638 ms, though its advantage diminishes with smaller inputs (e.g., Test Case 2). K=2 MOE, selecting two experts with weighted combination, increases CPU times (0.042753 ms to 353.089 ms) due to added complexity, while CUDA maintains efficiency (0.483232 ms to 3.90237 ms). Although it lags slightly behind K=1 MOE due to the top-2 reduction and combination overhead, K=2 MOE providing better GPU MOE vs CPU MOE speed up than K=1 MOE due to better utilization of GPU's parallelism.
 
 Across all test cases, CUDA consistently outperforms CPU by orders of magnitude, with dense MLP benefiting most from GPU acceleration due to its uniform computation, while MOE variants leverage sparse expert selection to reduce workload, especially effective with larger expert pools (e.g., 64 experts in Test Case 5). For smaller inputs (Test Cases 2 and 3), CPU MoE implementations are competitive or faster than CUDA due to minimal data transfer overhead, but scalability favors CUDA as batch and sequence sizes increase (Test Cases 4 and 5), where dense MLP CPU times soar (up to 2394.01 ms) compared to CUDA's 5.85469 ms. K=2 MOE introduces additional latency over K=1 MOE due to dual expert processing, but its flexibility in expert weighting could enhance model accuracy so it is widely used (e.g. Deepseek), making CUDA the preferred choice for large-scale deployments despite the slight performance trade-off. 

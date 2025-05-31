@@ -73,7 +73,7 @@ All tests passed!
 
 * Finally, download Nvidia Nsight compute and run the profiler using: ncu -o rope_profile_top2 --set full ./test_moe_top2
 
-## Performance:   
+## Performance
 
     K=1 MOE vs K=2 MOE Speedup: 1.6x
     Sparse MOE vs Dense MLP Speedup: 3.3x

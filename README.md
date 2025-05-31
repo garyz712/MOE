@@ -81,5 +81,3 @@ Across all test cases, CUDA consistently outperforms CPU by orders of magnitude,
 
 
 
-* MOE Top 2 Router Kernel:
-The profiling of the max_reduction_top2_kernel on an NVIDIA RTX A5000 GPU, executed in 12.06 µs over 13,985 cycles at 1.16 GHz with a grid size of (2048, 1, 1) and block size of (16, 1, 1), shows 16.38 K global kernel instances (8.19 K requests) and 120.81 K shared memory instances (72.20 K requests), with memory traffic of 524.29 KB in L1/TEX cache (21.97% hit rate), 202.02 KB in L2 cache (37.54% hit rate), and 128.00 B in device memory; the kernel's implementation, which uses a 16-thread block to perform a top-2 expert selection with softmax weighting, leverages shared memory (s_logits and s_indices) for parallel reduction across 2048 tokens

@@ -73,7 +73,7 @@ All tests passed!
 
 * Finally, download Nvidia Nsight compute and run the profiler using: ncu -o rope_profile_top2 --set full ./test_moe_top2
 
-## Performance Comparisons between K=1 MOE vs K=2 MOE, Dense MLP vs Sparse MOE, CPU MOE/MLP vs GPU MOE/MLP:
+## Performance Analysis: K=1 MOE vs K=2 MOE, Dense MLP vs Sparse MOE, CPU MOE/MLP vs GPU MOE/MLP
 
 The experiment results highlight significant performance differences between dense MLP, K=1 MOE, and K=2 MOE implementations across CPU and CUDA platforms. For dense MLP, CPU execution times range from 0.028425 ms to 2363.94 ms, while CUDA drastically reduces this to 0.1984 ms to 5.85469 ms, showcasing GPU's superior parallel processing for large-scale matrix operations. K=1 MOE, combining router and expert MLP, performs better on CPU (0.01699 ms to 262.114 ms) than dense MLP due to selective expert computation, with CUDA further accelerating it to 0.470208 ms to 2.43638 ms, though its advantage diminishes with smaller inputs (e.g., Test Case 2). K=2 MOE, selecting two experts with weighted combination, increases CPU times (0.042753 ms to 353.089 ms) due to added complexity, while CUDA maintains efficiency (0.483232 ms to 3.90237 ms). Although it lags slightly behind K=1 MOE due to the top-2 reduction and combination overhead, K=2 MOE providing better GPU MOE vs CPU MOE speed up than K=1 MOE due to better utilization of GPU's parallelism.
 
